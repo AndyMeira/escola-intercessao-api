@@ -2,7 +2,7 @@ export default async function handler(req, res) {
   // Libera acesso vindo do site no GitHub Pages
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
@@ -17,12 +17,37 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: 'Chave GEMINI_API_KEY não configurada no Vercel.' });
   }
 
+  // Segurança: só aceita pedidos de quem estiver logado de verdade no site
+  // (verifica o token de sessão do Supabase antes de gastar cota do Gemini).
+  const SUPABASE_URL = "https://xmlspowbfzbptldtferl.supabase.co";
+  const SUPABASE_ANON_KEY = "sb_publishable_TCe91nYvgglwoFCeCyDm4Q_a05Lxa0R";
+
+  const authHeader = req.headers.authorization || '';
+  const token = authHeader.replace('Bearer ', '').trim();
+
+  if (!token) {
+    return res.status(401).json({ error: 'Não autenticado. Faça login para usar o chat.' });
+  }
+
+  try {
+    const userCheck = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        apikey: SUPABASE_ANON_KEY
+      }
+    });
+
+    if (!userCheck.ok) {
+      return res.status(401).json({ error: 'Sessão inválida ou expirada. Faça login novamente.' });
+    }
+  } catch (e) {
+    return res.status(401).json({ error: 'Não foi possível verificar sua sessão.' });
+  }
+
   try {
     const { model, body } = req.body;
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 
-    // Tenta a chamada até 3 vezes no total (1 tentativa original + 2 novas tentativas).
-    // Isso resolve o erro "high demand" (503), que costuma ser passageiro.
     const maxTentativas = 3;
     let ultimaResposta, ultimoDado;
 
@@ -37,20 +62,16 @@ export default async function handler(req, res) {
       ultimaResposta = response;
       ultimoDado = data;
 
-      // Considera "alta demanda" quando o status é 503, ou quando o texto
-      // do erro menciona demanda/sobrecarga (o Gemini varia a mensagem).
       const mensagemErro = JSON.stringify(data.error || '').toLowerCase();
       const altaDemanda = response.status === 503 ||
         mensagemErro.includes('overloaded') ||
         mensagemErro.includes('high demand');
 
       if (response.ok || !altaDemanda) {
-        // Deu certo, ou o erro não é de alta demanda (não adianta tentar de novo)
         break;
       }
 
       if (tentativa < maxTentativas) {
-        // Espera um pouco antes de tentar de novo (1s, depois 2s)
         await new Promise(resolve => setTimeout(resolve, tentativa * 1000));
       }
     }
