@@ -1,11 +1,27 @@
 export default async function handler(req, res) {
-  // Libera acesso vindo do site no GitHub Pages
-  res.setHeader('Access-Control-Allow-Origin', '*');
+  // Permite acesso apenas do site oficial no GitHub Pages
+  const ALLOWED_ORIGINS = [
+    'https://andymeira.github.io',
+    'https://andymeira.github.io/Escola-Intercessao',
+    'http://localhost:5500', // para testes locais (Live Server), remova se não usar
+    'http://127.0.0.1:5500'
+  ];
+  const origin = req.headers.origin || '';
+
+  if (ALLOWED_ORIGINS.includes(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+  }
+  res.setHeader('Vary', 'Origin');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 
   if (req.method === 'OPTIONS') {
-    return res.status(200).end();
+    return res.status(204).end();
+  }
+
+  // Bloqueia requisições de origens não autorizadas
+  if (origin && !ALLOWED_ORIGINS.includes(origin)) {
+    return res.status(403).json({ error: { message: 'Origem não autorizada.' } });
   }
 
   if (req.method !== 'POST') {
@@ -18,6 +34,7 @@ export default async function handler(req, res) {
   }
 
   const SUPABASE_URL = "https://xmlspowbfzbptldtferl.supabase.co";
+
   const SUPABASE_ANON_KEY = "sb_publishable_TCe91nYvgglwoFCeCyDm4Q_a05Lxa0R";
 
   const authHeader = req.headers.authorization || '';
